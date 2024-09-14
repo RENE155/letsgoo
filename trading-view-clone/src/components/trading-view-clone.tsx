@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useRef } from 'react'
-import { createChart, ColorType, CrosshairMode, LineStyle, IChartApi, ISeriesApi } from 'lightweight-charts'
+import { createChart, ColorType, CrosshairMode, LineStyle, IChartApi, ISeriesApi, Time } from 'lightweight-charts'
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./ui/table"
 import { Button } from "./ui/button"
@@ -14,6 +14,8 @@ const client = new RestClientV5({
   secret: 'O6lHepfsHMwMj8QzTkekBIPlToJSjj0fHrfF',
 })
 
+const ws = new WebSocket('wss://stream.bybit.com/v5/public/linear')
+
 interface CoinData {
   symbol: string
   price: number
@@ -21,7 +23,7 @@ interface CoinData {
 }
 
 interface CandleData {
-  time: number
+  time: Time
   open: number
   high: number
   low: number
@@ -49,7 +51,6 @@ export default function TradingViewClone() {
             change: parseFloat(coin.price24hPcnt) * 100,
           }))
         setTopGainers(sortedData)
-        if (!selectedCoin) setSelectedCoin(sortedData[0])
       } catch (error) {
         console.error('Error fetching top gainers:', error)
       }
@@ -74,13 +75,13 @@ export default function TradingViewClone() {
           })
           const data = response.result.list
             .map((candle: any) => ({
-              time: parseInt(candle[0]) / 1000,
+              time: (parseInt(candle[0]) / 1000) as Time,
               open: parseFloat(candle[1]),
               high: parseFloat(candle[2]),
               low: parseFloat(candle[3]),
               close: parseFloat(candle[4]),
             }))
-            .sort((a, b) => a.time - b.time) // Sort data in ascending order by time
+            .sort((a: { time: Time }, b: { time: Time }) => parseInt(a.time as string) - parseInt(b.time as string)) // Sort data in ascending order by time
           setChartData(data)
         } catch (error) {
           console.error('Error fetching chart data:', error)
@@ -151,6 +152,36 @@ export default function TradingViewClone() {
       seriesRef.current.setData(chartData)
     }
   }, [chartData])
+
+  useEffect(() => {
+    if (selectedCoin) {
+      ws.onopen = () => {
+        ws.send(JSON.stringify({
+          op: 'subscribe',
+          args: [`klineV2.1.${selectedCoin.symbol}`]
+        }))
+      }
+
+      ws.onmessage = (event) => {
+        const message = JSON.parse(event.data)
+        if (message.topic === `klineV2.1.${selectedCoin.symbol}`) {
+          const kline = message.data[0]
+          const newCandle = {
+            time: (parseInt(kline.start) / 1000) as Time,
+            open: parseFloat(kline.open),
+            high: parseFloat(kline.high),
+            low: parseFloat(kline.low),
+            close: parseFloat(kline.close),
+          }
+          setChartData(prevData => [...prevData, newCandle])
+        }
+      }
+
+      return () => {
+        ws.close()
+      }
+    }
+  }, [selectedCoin])
 
   const handleCoinSelect = (coin: CoinData) => {
     setSelectedCoin(coin)
