@@ -1,4 +1,4 @@
-import TradingViewClone from '@/components/trading-view-clone'
+import TradingViewClone from '@/components/TradingViewClone'
 
 export default function Home() {
   return (
